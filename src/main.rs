@@ -17,12 +17,11 @@ struct Args {
 fn main() -> io::Result<()> {
     let mut args = Args::parse();
 
-    let Some(cmd) = args.cmd.pop() else {
-        eprintln!("No command specified");
+    if args.cmd.len() == 0 {
         std::process::exit(1);
-    };
+    }
 
-    let mut cmd = Command::new(cmd);
+    let mut cmd = Command::new(args.cmd.remove(0));
     for arg in args.cmd {
         cmd.arg(arg);
     }
