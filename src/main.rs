@@ -4,24 +4,24 @@ use std::process::{Command, Stdio};
 use clap::Parser;
 use termcolor::{ColorChoice, StandardStream};
 
-/// Print colorized Rust backtraces by capturing the output of an external command.
+/// Print colorized Rust backtraces by capturing the output of an external process.
 #[derive(clap::Parser)]
-#[command(version, about, long_about = None)]
+#[command(about, long_about = None)]
 struct Args {
     #[arg(trailing_var_arg(true))]
     cmd: Vec<String>,
 
     /// Set the backtrace style to short (RUST_BACKTRACE=1) or full (RUST_BACKTRACE=full)
-    #[arg(long, short, default_value = "short")]
+    #[arg(long, default_value = "short")]
     style: BacktraceStyle,
 
     /// Set RUST_LIB_BACKTRACE=0
-    #[arg(long, short)]
+    #[arg(long)]
     no_lib_backtrace: bool,
 
-    /// By default, backtracetk prints every captured line as it reads it. If this flag is set then
+    /// By default, backtracetk prints every captured line as it reads it. If this flag is set,
     /// this output is suppressed and nothing will be printed until the program exits.
-    #[arg(long, short)]
+    #[arg(long)]
     hide_output: bool,
 }
 
