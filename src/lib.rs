@@ -14,7 +14,7 @@ pub struct Backtrace {
 
 struct PanicInfo {
     thread: String,
-    source: SourceInfo,
+    at: String,
     message: Vec<String>,
 }
 
@@ -35,10 +35,13 @@ impl Backtrace {
         if self.frames.is_empty() {
             return Ok(());
         }
-        let frameno_width = self.frames.len().ilog10() as usize + 1;
+        let framnow = self.compute_frameno_width();
+        let linenow = self.compute_lineno_width();
+        let width = self.compute_width(framnow);
+        writeln!(out, "\n{:━^width$}", " BACKTRACE ")?;
 
         for frame in self.frames.iter().rev() {
-            frame.render(out, frameno_width)?;
+            frame.render(out, framnow, linenow)?;
         }
 
         if let Some(panic_info) = &self.panic_info {
@@ -47,47 +50,90 @@ impl Backtrace {
 
         writeln!(out)
     }
+
+    fn compute_lineno_width(&self) -> usize {
+        // This is assuming we have 2 more lines in the file, if we don't, in the worst case we will
+        // print an unnecesary extra space for each line number.
+        self.frames
+            .iter()
+            .flat_map(|f| &f.source_info)
+            .map(|source_info| source_info.lineno + 3)
+            .max()
+            .unwrap_or(1)
+            .ilog10() as usize
+    }
+
+    fn compute_frameno_width(&self) -> usize {
+        self.frames.len().ilog10() as usize + 1
+    }
+
+    fn compute_width(&self, frameno_width: usize) -> usize {
+        let term_size = termion::terminal_size().unwrap_or((80, 0)).0 as usize;
+        self.frames
+            .iter()
+            .map(|f| f.width(frameno_width))
+            .max()
+            .unwrap_or(80)
+            .min(term_size)
+    }
 }
 
 impl Frame {
-    fn render(&self, out: &mut StandardStream, width: usize) -> io::Result<()> {
-        write!(out, "{:>width$}: ", self.frameno)?;
+    fn render(&self, out: &mut StandardStream, framenow: usize, linenow: usize) -> io::Result<()> {
+        write!(out, "{:>framenow$}: ", self.frameno)?;
 
         out.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
         writeln!(out, "{}", self.function)?;
         out.set_color(&ColorSpec::new())?;
 
         if let Some(source_info) = &self.source_info {
-            source_info.render(out, width)?;
+            source_info.render(out, framenow, linenow)?;
         }
         Ok(())
+    }
+
+    fn width(&self, frameno_width: usize) -> usize {
+        usize::max(
+            frameno_width + 2 + self.function.len(),
+            self.source_info
+                .as_ref()
+                .map(|s| s.width(frameno_width))
+                .unwrap_or(0),
+        )
     }
 }
 
 impl SourceInfo {
-    fn render(&self, out: &mut StandardStream, width: usize) -> io::Result<()> {
-        write!(out, "{:width$}  at ", "")?;
+    fn render(&self, out: &mut StandardStream, framenow: usize, linenow: usize) -> io::Result<()> {
+        write!(out, "{:framenow$}  at ", "")?;
         writeln!(out, "{self}")?;
-        self.render_code(out, width)?;
+        self.render_code(out, framenow, linenow)?;
         Ok(())
     }
 
-    fn render_code(&self, out: &mut StandardStream, width: usize) -> io::Result<()> {
+    fn render_code(
+        &self,
+        out: &mut StandardStream,
+        framenow: usize,
+        linenow: usize,
+    ) -> io::Result<()> {
         let path = Path::new(&self.file);
         if path.exists() {
             let lineno = self.lineno - 1;
             let file = File::open(path)?;
             let reader = io::BufReader::new(file);
-            let viewport = reader
+            let viewport: Vec<_> = reader
                 .lines()
                 .enumerate()
                 .skip(lineno.saturating_sub(2))
-                .take(5);
+                .take(5)
+                .collect();
+
             for (i, line) in viewport {
                 if i == lineno {
                     out.set_color(ColorSpec::new().set_bold(true))?;
                 }
-                write!(out, "{:width$}    {} | ", "", i + 1)?;
+                write!(out, "{:framenow$}    {:>linenow$} | ", "", i + 1)?;
                 writeln!(out, "{}", line?)?;
                 if i == lineno {
                     out.set_color(ColorSpec::new().set_bold(false))?;
@@ -95,6 +141,11 @@ impl SourceInfo {
             }
         }
         Ok(())
+    }
+
+    /// Width without considering the source code snippet
+    fn width(&self, framenow: usize) -> usize {
+        framenow + self.file.len() + (self.lineno.ilog10() + self.colno.ilog10()) as usize + 9
     }
 }
 
@@ -107,12 +158,11 @@ impl std::fmt::Display for SourceInfo {
 impl PanicInfo {
     fn render(&self, out: &mut StandardStream) -> io::Result<()> {
         out.set_color(ColorSpec::new().set_fg(Some(Color::Red)))?;
-        writeln!(out, "thread '{}' panicked at {}", self.thread, self.source)?;
-        out.set_color(&ColorSpec::new())?;
-
+        writeln!(out, "thread '{}' panicked at {}", self.thread, self.at)?;
         for line in &self.message {
-            writeln!(out, ">> {}", line)?;
+            writeln!(out, "{}", line)?;
         }
+        out.set_color(&ColorSpec::new())?;
         Ok(())
     }
 }
@@ -129,7 +179,7 @@ enum ParsedLine {
     /// ```ignore
     /// thread 'rustc' panicked at /rustc/b3aa8e7168a3d940122db3561289ffbf3f587262/compiler/rustc_errors/src/lib.rs:1651:9:
     /// ```
-    ThreadPanic { thread: String, source: SourceInfo },
+    ThreadPanic { thread: String, at: String },
     /// The begining of a trace starts with `stack backtrace:`
     BacktraceStart,
     /// The "header" of a frame containing the frame number and the function's name, e.g.,
@@ -142,13 +192,14 @@ enum ParsedLine {
     ///              at /rustc/b3aa8e7168a3d940122db3561289ffbf3f587262/compiler/rustc_middle/src/ty/context/tls.rs:79:9
     /// ```
     BacktraceSource(SourceInfo),
-    /// A line that doesn't match any patter
+    /// A line that doesn't match any pattern
     Other(String),
 }
 
 impl Parser {
     pub fn new() -> Parser {
-        let panic_regex = Regex::new(r"^thread\s+'(?P<thread>[^']+)'\spanicked\s+at\s+(?P<file>[^:]+):(?P<lineno>\d+):(?P<colno>\d+)").unwrap();
+        let panic_regex =
+            Regex::new(r"^thread\s+'(?P<thread>[^']+)'\spanicked\s+at\s+(?P<at>.+)").unwrap();
         let function_regex =
             Regex::new(r"^\s+(?P<frameno>\d+):\s+((\w+)\s+-\s+)?(?P<function>.+)").unwrap();
         let source_regex =
@@ -166,17 +217,8 @@ impl Parser {
             ParsedLine::BacktraceStart
         } else if let Some(captures) = self.panic_regex.captures(&line) {
             let thread = captures.name("thread").unwrap().as_str().to_string();
-            let file = captures.name("file").unwrap().as_str().to_string();
-            let lineno = captures.name("lineno").unwrap().as_str();
-            let colno = captures.name("colno").unwrap().as_str();
-            ParsedLine::ThreadPanic {
-                thread,
-                source: SourceInfo {
-                    file,
-                    lineno: lineno.parse().unwrap(),
-                    colno: colno.parse().unwrap(),
-                },
-            }
+            let at = captures.name("at").unwrap().as_str().to_string();
+            ParsedLine::ThreadPanic { thread, at }
         } else if let Some(captures) = self.function_regex.captures(&line) {
             let frameno = captures.name("frameno").unwrap().as_str().to_string();
             let function = captures.name("function").unwrap().as_str().to_string();
@@ -207,11 +249,11 @@ impl Parser {
         let mut in_panic_info = false;
         while let Some(line) = lines.next() {
             match line {
-                ParsedLine::ThreadPanic { thread, source } => {
+                ParsedLine::ThreadPanic { thread, at } => {
                     in_panic_info = true;
                     panic_info = Some(PanicInfo {
                         thread,
-                        source,
+                        at,
                         message: vec![],
                     });
                 }

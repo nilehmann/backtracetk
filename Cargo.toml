@@ -9,3 +9,4 @@ version = "0.1.0"
 clap = { version = "4.3.3", features = ["derive"] }
 regex = "1.8.1"
 termcolor = "1.2.0"
+termion = "2.0.1"
