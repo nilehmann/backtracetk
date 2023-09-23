@@ -4,16 +4,33 @@ use std::process::{Command, Stdio};
 use clap::Parser;
 use termcolor::{ColorChoice, StandardStream};
 
-#[derive(clap::Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[derive(clap::Parser)]
+#[command(version, about, long_about = None)]
 struct Args {
     #[arg(trailing_var_arg(true))]
     cmd: Vec<String>,
 
-    #[arg(long, short, default_value = "1")]
-    backtrace: String,
+    #[arg(long, short, default_value = "short")]
+    style: BacktraceStyle,
+
+    #[arg(long, short)]
+    no_lib_backtrace: bool,
 }
 
+#[derive(clap::ValueEnum, Copy, Clone)]
+enum BacktraceStyle {
+    Short,
+    Full,
+}
+
+impl BacktraceStyle {
+    fn env_var_str(&self) -> &'static str {
+        match self {
+            BacktraceStyle::Short => "1",
+            BacktraceStyle::Full => "full",
+        }
+    }
+}
 fn main() -> io::Result<()> {
     let mut args = Args::parse();
 
@@ -21,28 +38,29 @@ fn main() -> io::Result<()> {
         std::process::exit(1);
     }
 
-    let mut cmd = Command::new(args.cmd.remove(0));
-    for arg in args.cmd {
-        cmd.arg(arg);
+    let mut env_vars = vec![("RUST_BACKTRACE", args.style.env_var_str())];
+    if args.no_lib_backtrace {
+        env_vars.push(("RUST_LIB_BACKTRACE", "0"));
     }
-    let child = cmd
+
+    let child = Command::new(args.cmd.remove(0))
+        .args(args.cmd)
         .stderr(Stdio::piped())
-        .env("RUST_BACKTRACE", args.backtrace)
-        .spawn()
-        .expect("Failed to execute command");
+        .envs(env_vars)
+        .spawn()?;
 
     let mut parser = backtracetk::Parser::new();
-    let stderr = child.stderr.expect("Failed to open stderr");
+    let stderr = child.stderr.expect("failed to open stderr");
     for line in BufReader::new(stderr).lines() {
         let line = line?;
-        if !parser.parse_line(&line) {
-            eprintln!("{line}");
-        }
+        eprintln!("{line}");
+        parser.parse_line(line);
     }
-    let backtrace = parser.into_backtrace();
 
     let mut stderr = StandardStream::stderr(ColorChoice::Auto);
-    backtrace.render(&mut stderr)?;
+    for backtrace in parser.into_backtraces() {
+        backtrace.render(&mut stderr)?;
+    }
 
     Ok(())
 }
