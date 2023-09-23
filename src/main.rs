@@ -6,7 +6,7 @@ use termcolor::{ColorChoice, StandardStream};
 
 /// Print colorized Rust backtraces by capturing the output of an external process.
 #[derive(clap::Parser)]
-#[command(about, long_about = None)]
+#[command(max_term_width = 110)]
 struct Args {
     #[arg(trailing_var_arg(true))]
     cmd: Vec<String>,
@@ -19,8 +19,8 @@ struct Args {
     #[arg(long)]
     no_lib_backtrace: bool,
 
-    /// By default, backtracetk prints every captured line as it reads it. If this flag is set,
-    /// this output is suppressed and nothing will be printed until the program exits.
+    /// By default, backtracetk prints every captured line as it reads it to get immediate feedback.
+    /// If this flag is set, this output is suppressed and nothing will be printed until the program exits
     #[arg(long)]
     hide_output: bool,
 }
