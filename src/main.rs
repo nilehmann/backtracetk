@@ -6,22 +6,27 @@ use backtracetk::Frame;
 use clap::Parser;
 use regex::Regex;
 use serde::Deserialize;
-use termcolor::{ColorChoice, StandardStream};
 
 /// Print colorized Rust backtraces by capturing the output of an external process.
 #[derive(clap::Parser)]
-#[command(max_term_width = 110)]
+#[command(max_term_width = 110, arg_required_else_help = true)]
 struct Args {
     #[arg(trailing_var_arg(true))]
     cmd: Vec<String>,
 
-    /// Set the backtrace style to short (RUST_BACKTRACE=1) or full (RUST_BACKTRACE=full)
+    /// Set the backtrace style to `short` (RUST_BACKTRACE=1) or `full` (RUST_BACKTRACE=full)
     #[arg(long, default_value = "short")]
     style: BacktraceStyle,
 
-    /// By default, backtracetk sets RUST_LIB_BACKTRACE=0. Set this flag to revert this behavior
-    #[arg(long)]
-    enable_lib_backtrace: bool,
+    /// Enable or disable `Backtrace::capture`. If this flag is set to `no`, backtracetk sets
+    /// RUST_LIB_BACKTRACE=0, disabling `Backtrace::capture`. If the flag is set to `yes`, no
+    /// changes are made, and the default behavior of capturing backtraces remains enabled.
+    #[arg(long, default_value = "no")]
+    lib_backtrace: YesNo,
+
+    /// If this flag is `yes`, set CLICOLOR_FORCE=1. If the flag is `no`, no changes are made.
+    #[arg(long, default_value = "yes")]
+    clicolor_force: YesNo,
 
     /// By default, backtracetk prints each captured line as it reads it, providing immediate feedback.
     /// If this flag is set, this output is suppressed, and nothing will be printed until the program
@@ -36,6 +41,22 @@ enum BacktraceStyle {
     Full,
 }
 
+#[derive(clap::ValueEnum, Copy, Clone, Debug)]
+enum YesNo {
+    Yes,
+    No,
+}
+
+impl YesNo {
+    fn is_yes(&self) -> bool {
+        matches!(self, Self::Yes)
+    }
+
+    fn is_no(&self) -> bool {
+        matches!(self, Self::No)
+    }
+}
+
 impl BacktraceStyle {
     fn env_var_str(&self) -> &'static str {
         match self {
@@ -47,15 +68,14 @@ impl BacktraceStyle {
 fn main() -> io::Result<()> {
     let mut args = Args::parse();
 
-    if args.cmd.len() == 0 {
-        std::process::exit(1);
-    }
-
     let config = read_config();
 
     let mut env_vars = vec![("RUST_BACKTRACE", args.style.env_var_str())];
-    if !args.enable_lib_backtrace {
+    if args.lib_backtrace.is_no() {
         env_vars.push(("RUST_LIB_BACKTRACE", "0"));
+    }
+    if args.clicolor_force.is_yes() {
+        env_vars.push(("CLICOLOR_FORCE", "1"));
     }
 
     println!("$ {}", args.cmd.join(" "));
@@ -78,12 +98,10 @@ fn main() -> io::Result<()> {
     for line in BufReader::new(stderr).lines() {
         let line = line?;
         if !args.hide_output {
-            eprintln!("{line}");
+            anstream::eprintln!("{line}");
         }
         parser.parse_line(line);
     }
-
-    let mut stderr = StandardStream::stderr(ColorChoice::Auto);
 
     let mut filter = |frame: &Frame| {
         for regex in &config.hide {
@@ -94,7 +112,7 @@ fn main() -> io::Result<()> {
         false
     };
     for backtrace in parser.into_backtraces() {
-        backtrace.render(&mut stderr, &mut filter)?;
+        backtrace.render(&mut filter)?;
     }
 
     Ok(())
@@ -119,7 +137,6 @@ fn read_config() -> Config {
 }
 
 fn find_config_file() -> Option<std::path::PathBuf> {
-    // find config file in current or parent directories
     let mut path = std::env::current_dir().unwrap();
     loop {
         for name in ["backtracetk.toml", ".backtracetk.toml"] {

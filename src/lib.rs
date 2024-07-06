@@ -1,11 +1,19 @@
 use std::{
     fs::File,
-    io::{self, BufRead, Write},
+    io::{self, BufRead},
     path::Path,
 };
 
 use regex::Regex;
-use termcolor::{Color, ColorSpec, StandardStream, WriteColor};
+
+const GREEN: anstyle::Style =
+    anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green)));
+const CYAN: anstyle::Style =
+    anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan)));
+const RED: anstyle::Style =
+    anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Red)));
+const BOLD: anstyle::Style = anstyle::Style::new().bold();
+const RESET: anstyle::Reset = anstyle::Reset;
 
 pub struct Backtrace {
     frames: Vec<Frame>,
@@ -13,32 +21,33 @@ pub struct Backtrace {
 }
 
 impl Backtrace {
-    pub fn render(&self, out: &mut StandardStream, filter: &mut impl Filter) -> io::Result<()> {
+    pub fn render(&self, filter: &mut impl Filter) -> io::Result<()> {
         if self.frames.is_empty() {
             return Ok(());
         }
         let framnow = self.compute_frameno_width();
         let linenow = self.compute_lineno_width();
         let width = self.compute_width(framnow);
-        writeln!(out, "\n{:━^width$}", " BACKTRACE ")?;
+        anstream::println!("\n{:━^width$}", " BACKTRACE ");
 
         let mut hidden = 0;
         for frame in self.frames.iter().rev() {
             if filter.exclude(frame) {
                 hidden += 1;
             } else {
-                print_hidden_frames_message(out, hidden)?;
-                frame.render(out, framnow, linenow)?;
+                print_hidden_frames_message(hidden, width)?;
+                frame.render(framnow, linenow)?;
                 hidden = 0;
             }
         }
-        print_hidden_frames_message(out, hidden)?;
+        print_hidden_frames_message(hidden, width)?;
 
         if let Some(panic_info) = &self.panic_info {
-            panic_info.render(out)?;
+            panic_info.render()?;
         }
 
-        writeln!(out)
+        println!();
+        Ok(())
     }
 
     fn compute_lineno_width(&self) -> usize {
@@ -81,15 +90,17 @@ pub struct Frame {
 }
 
 impl Frame {
-    fn render(&self, out: &mut StandardStream, framenow: usize, linenow: usize) -> io::Result<()> {
-        write!(out, "{:>framenow$}: ", self.frameno)?;
-
-        out.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
-        writeln!(out, "{}", self.function)?;
-        out.set_color(&ColorSpec::new())?;
+    fn render(&self, framenow: usize, linenow: usize) -> io::Result<()> {
+        anstream::println!(
+            "{:>framenow$}: {GREEN}{}{RESET}",
+            self.frameno,
+            self.function
+        );
 
         if let Some(source_info) = &self.source_info {
-            source_info.render(out, framenow, linenow)?;
+            let padding = Padding(framenow);
+            anstream::println!("{padding}  at {source_info}");
+            source_info.render_code(padding, linenow)?;
         }
         Ok(())
     }
@@ -111,34 +122,18 @@ pub struct SourceInfo {
     colno: usize,
 }
 
-fn print_hidden_frames_message(out: &mut StandardStream, hidden: u32) -> io::Result<()> {
-    out.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
-    match hidden {
-        0 => {}
-        1 => {
-            writeln!(out, " ({hidden} frame hidden)")?;
-        }
-        _ => {
-            writeln!(out, " ({hidden} frames hidden)")?;
-        }
-    }
-    out.set_color(&ColorSpec::new())
+fn print_hidden_frames_message(hidden: u32, width: usize) -> io::Result<()> {
+    let msg = match hidden {
+        0 => return Ok(()),
+        1 => format!(" ({hidden} frame hidden) "),
+        _ => format!(" ({hidden} frames hidden) "),
+    };
+    anstream::println!("{CYAN}{msg:┄^width$}{RESET}");
+    Ok(())
 }
 
 impl SourceInfo {
-    fn render(&self, out: &mut StandardStream, framenow: usize, linenow: usize) -> io::Result<()> {
-        write!(out, "{:framenow$}  at ", "")?;
-        writeln!(out, "{self}")?;
-        self.render_code(out, framenow, linenow)?;
-        Ok(())
-    }
-
-    fn render_code(
-        &self,
-        out: &mut StandardStream,
-        framenow: usize,
-        linenow: usize,
-    ) -> io::Result<()> {
+    fn render_code(&self, padding: Padding, linenow: usize) -> io::Result<()> {
         let path = Path::new(&self.file);
         if path.exists() {
             let lineno = self.lineno - 1;
@@ -150,15 +145,13 @@ impl SourceInfo {
                 .skip(lineno.saturating_sub(2))
                 .take(5)
                 .collect();
-
             for (i, line) in viewport {
                 if i == lineno {
-                    out.set_color(ColorSpec::new().set_bold(true))?;
+                    anstream::print!("{BOLD}");
                 }
-                write!(out, "{:framenow$}    {:>linenow$} | ", "", i + 1)?;
-                writeln!(out, "{}", line?)?;
+                anstream::println!("{padding}    {:>linenow$} | {}", i + 1, line?);
                 if i == lineno {
-                    out.set_color(ColorSpec::new().set_bold(false))?;
+                    anstream::print!("{RESET}");
                 }
             }
         }
@@ -178,13 +171,24 @@ impl std::fmt::Display for SourceInfo {
 }
 
 impl PanicInfo {
-    fn render(&self, out: &mut StandardStream) -> io::Result<()> {
-        out.set_color(ColorSpec::new().set_fg(Some(Color::Red)))?;
-        writeln!(out, "thread '{}' panicked at {}", self.thread, self.at)?;
+    fn render(&self) -> io::Result<()> {
+        anstream::print!("{RED}");
+        anstream::println!("thread '{}' panickd at {}", self.thread, self.at);
         for line in &self.message {
-            writeln!(out, "{}", line)?;
+            anstream::println!("{line}");
         }
-        out.set_color(&ColorSpec::new())?;
+        anstream::print!("{RESET}");
+        Ok(())
+    }
+}
+
+struct Padding(usize);
+
+impl std::fmt::Display for Padding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for _ in 0..self.0 {
+            write!(f, " ")?;
+        }
         Ok(())
     }
 }
