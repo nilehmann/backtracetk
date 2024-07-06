@@ -12,26 +12,8 @@ pub struct Backtrace {
     panic_info: Option<PanicInfo>,
 }
 
-struct PanicInfo {
-    thread: String,
-    at: String,
-    message: Vec<String>,
-}
-
-pub struct Frame {
-    function: String,
-    frameno: u32,
-    source_info: Option<SourceInfo>,
-}
-
-pub struct SourceInfo {
-    file: String,
-    lineno: usize,
-    colno: usize,
-}
-
 impl Backtrace {
-    pub fn render(&self, out: &mut StandardStream) -> io::Result<()> {
+    pub fn render(&self, out: &mut StandardStream, filter: &mut impl Filter) -> io::Result<()> {
         if self.frames.is_empty() {
             return Ok(());
         }
@@ -40,9 +22,17 @@ impl Backtrace {
         let width = self.compute_width(framnow);
         writeln!(out, "\n{:━^width$}", " BACKTRACE ")?;
 
+        let mut hidden = 0;
         for frame in self.frames.iter().rev() {
-            frame.render(out, framnow, linenow)?;
+            if filter.exclude(frame) {
+                hidden += 1;
+            } else {
+                print_hidden_frames_message(out, hidden)?;
+                frame.render(out, framnow, linenow)?;
+                hidden = 0;
+            }
         }
+        print_hidden_frames_message(out, hidden)?;
 
         if let Some(panic_info) = &self.panic_info {
             panic_info.render(out)?;
@@ -78,6 +68,18 @@ impl Backtrace {
     }
 }
 
+struct PanicInfo {
+    thread: String,
+    at: String,
+    message: Vec<String>,
+}
+
+pub struct Frame {
+    pub function: String,
+    frameno: u32,
+    source_info: Option<SourceInfo>,
+}
+
 impl Frame {
     fn render(&self, out: &mut StandardStream, framenow: usize, linenow: usize) -> io::Result<()> {
         write!(out, "{:>framenow$}: ", self.frameno)?;
@@ -101,6 +103,26 @@ impl Frame {
                 .unwrap_or(0),
         )
     }
+}
+
+pub struct SourceInfo {
+    file: String,
+    lineno: usize,
+    colno: usize,
+}
+
+fn print_hidden_frames_message(out: &mut StandardStream, hidden: u32) -> io::Result<()> {
+    out.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
+    match hidden {
+        0 => {}
+        1 => {
+            writeln!(out, " ({hidden} frame hidden)")?;
+        }
+        _ => {
+            writeln!(out, " ({hidden} frames hidden)")?;
+        }
+    }
+    out.set_color(&ColorSpec::new())
 }
 
 impl SourceInfo {
@@ -301,5 +323,18 @@ impl Parser {
             backtraces.push(Backtrace { frames, panic_info });
         }
         backtraces
+    }
+}
+
+pub trait Filter {
+    fn exclude(&mut self, frame: &Frame) -> bool;
+}
+
+impl<F> Filter for F
+where
+    F: FnMut(&Frame) -> bool,
+{
+    fn exclude(&mut self, frame: &Frame) -> bool {
+        (self)(frame)
     }
 }
