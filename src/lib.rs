@@ -1,3 +1,5 @@
+pub mod config;
+
 use std::{
     fs::File,
     io::{self, BufRead},
@@ -28,7 +30,7 @@ impl Backtrace {
         let framnow = self.compute_frameno_width();
         let linenow = self.compute_lineno_width();
         let width = self.compute_width(framnow);
-        anstream::println!("\n{:━^width$}", " BACKTRACE ");
+        anstream::eprintln!("\n{:━^width$}", " BACKTRACE ");
 
         let mut hidden = 0;
         for frame in self.frames.iter().rev() {
@@ -46,7 +48,7 @@ impl Backtrace {
             panic_info.render()?;
         }
 
-        println!();
+        eprintln!();
         Ok(())
     }
 
@@ -91,7 +93,7 @@ pub struct Frame {
 
 impl Frame {
     fn render(&self, framenow: usize, linenow: usize) -> io::Result<()> {
-        anstream::println!(
+        anstream::eprintln!(
             "{:>framenow$}: {GREEN}{}{RESET}",
             self.frameno,
             self.function
@@ -99,7 +101,7 @@ impl Frame {
 
         if let Some(source_info) = &self.source_info {
             let padding = Padding(framenow);
-            anstream::println!("{padding}  at {source_info}");
+            anstream::eprintln!("{padding}  at {source_info}");
             source_info.render_code(padding, linenow)?;
         }
         Ok(())
@@ -128,7 +130,7 @@ fn print_hidden_frames_message(hidden: u32, width: usize) -> io::Result<()> {
         1 => format!(" ({hidden} frame hidden) "),
         _ => format!(" ({hidden} frames hidden) "),
     };
-    anstream::println!("{CYAN}{msg:┄^width$}{RESET}");
+    anstream::eprintln!("{CYAN}{msg:┄^width$}{RESET}");
     Ok(())
 }
 
@@ -147,11 +149,11 @@ impl SourceInfo {
                 .collect();
             for (i, line) in viewport {
                 if i == lineno {
-                    anstream::print!("{BOLD}");
+                    anstream::eprint!("{BOLD}");
                 }
-                anstream::println!("{padding}    {:>linenow$} | {}", i + 1, line?);
+                anstream::eprintln!("{padding}    {:>linenow$} | {}", i + 1, line?);
                 if i == lineno {
-                    anstream::print!("{RESET}");
+                    anstream::eprint!("{RESET}");
                 }
             }
         }
@@ -172,12 +174,12 @@ impl std::fmt::Display for SourceInfo {
 
 impl PanicInfo {
     fn render(&self) -> io::Result<()> {
-        anstream::print!("{RED}");
-        anstream::println!("thread '{}' panickd at {}", self.thread, self.at);
+        anstream::eprint!("{RED}");
+        anstream::eprintln!("thread '{}' panickd at {}", self.thread, self.at);
         for line in &self.message {
-            anstream::println!("{line}");
+            anstream::eprintln!("{line}");
         }
-        anstream::print!("{RESET}");
+        anstream::eprint!("{RESET}");
         Ok(())
     }
 }

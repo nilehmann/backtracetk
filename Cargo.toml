@@ -10,7 +10,9 @@ anstream = "0.6.14"
 anstyle = "1.0.7"
 anyhow = "1.0.86"
 clap = { version = "4.5.8", features = ["derive", "wrap_help"] }
+home = "0.5.9"
 regex = "1.10.5"
 serde = { version = "1.0.203", features = ["derive"] }
+serde_with = "3.8.3"
 termion = "4.0.2"
-toml = { version = "0.8.14", features = ["parse"] }
+toml = "0.8.14"
