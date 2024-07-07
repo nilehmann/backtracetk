@@ -1,1 +1,6 @@
-hide = ["core::panicking", "rust_begin_unwind"] 
+[[hide]]
+pattern = "panic_macro::fn2"
+
+[[hide]]
+begin = "core::panicking"
+end = "rust_begin_unwind"

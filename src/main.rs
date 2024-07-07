@@ -1,8 +1,8 @@
 use std::fs;
-use std::io::{self, BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
 
-use backtracetk::Frame;
+use backtracetk::{Frame, FrameFilter};
 use clap::Parser;
 use regex::Regex;
 use serde::Deserialize;
@@ -65,10 +65,11 @@ impl BacktraceStyle {
         }
     }
 }
-fn main() -> io::Result<()> {
+fn main() -> anyhow::Result<()> {
     let mut args = Args::parse();
 
-    let config = read_config();
+    let config = Config::read()?;
+    let mut filters = config.to_filters()?;
 
     let mut env_vars = vec![("RUST_BACKTRACE", args.style.env_var_str())];
     if args.lib_backtrace.is_no() {
@@ -103,16 +104,8 @@ fn main() -> io::Result<()> {
         parser.parse_line(line);
     }
 
-    let mut filter = |frame: &Frame| {
-        for regex in &config.hide {
-            if regex.is_match(&frame.function) {
-                return true;
-            }
-        }
-        false
-    };
     for backtrace in parser.into_backtraces() {
-        backtrace.render(&mut filter)?;
+        backtrace.render(&mut filters)?;
     }
 
     Ok(())
@@ -120,44 +113,179 @@ fn main() -> io::Result<()> {
 
 #[derive(Default, Deserialize)]
 struct Config {
-    #[serde(deserialize_with = "deserialize_regex_vec")]
     #[serde(default = "Default::default")]
-    hide: Vec<Regex>,
+    hide: Vec<HideConfig>,
 }
 
-fn read_config() -> Config {
-    let Some(path) = find_config_file() else {
-        return Config::default();
-    };
+impl Config {
+    fn read() -> Result<Config, toml::de::Error> {
+        let Some(path) = Config::find_file() else {
+            return Ok(Config::default());
+        };
 
-    let mut contents = String::new();
-    let mut file = fs::File::open(path).unwrap();
-    file.read_to_string(&mut contents).unwrap();
-    toml::from_str(&contents).unwrap()
-}
+        let mut contents = String::new();
+        let mut file = fs::File::open(path).unwrap();
+        file.read_to_string(&mut contents).unwrap();
+        toml::from_str(&contents)
+    }
 
-fn find_config_file() -> Option<std::path::PathBuf> {
-    let mut path = std::env::current_dir().unwrap();
-    loop {
-        for name in ["backtracetk.toml", ".backtracetk.toml"] {
-            let file = path.join(name);
-            if file.exists() {
-                return Some(file);
-            }
+    fn to_filters(&self) -> Result<Filters, regex::Error> {
+        let mut filters = vec![];
+        for filter in &self.hide {
+            filters.push(filter.try_into()?)
         }
-        if !path.pop() {
-            return None;
+        Ok(Filters { filters })
+    }
+
+    fn find_file() -> Option<std::path::PathBuf> {
+        let mut path = std::env::current_dir().unwrap();
+        loop {
+            for name in ["backtracetk.toml", ".backtracetk.toml"] {
+                let file = path.join(name);
+                if file.exists() {
+                    return Some(file);
+                }
+            }
+            if !path.pop() {
+                return None;
+            }
         }
     }
 }
 
-fn deserialize_regex_vec<'de, D>(deserializer: D) -> Result<Vec<Regex>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let strings: Vec<String> = Vec::deserialize(deserializer)?;
-    strings
-        .into_iter()
-        .map(|s| Regex::try_from(s).map_err(serde::de::Error::custom))
-        .collect()
+enum HideConfig {
+    Pattern { pattern: String },
+    Span { begin: String, end: Option<String> },
+}
+
+pub struct Filters {
+    filters: Vec<Filter>,
+}
+
+impl FrameFilter for Filters {
+    fn should_hide(&mut self, frame: &Frame) -> bool {
+        self.filters
+            .iter_mut()
+            .any(|filter| filter.do_match(&frame.function))
+    }
+}
+
+enum Filter {
+    Pattern(Regex),
+    Span {
+        begin: Regex,
+        end: Option<Regex>,
+        in_section: bool,
+    },
+}
+
+impl Filter {
+    fn do_match(&mut self, s: &str) -> bool {
+        match self {
+            Filter::Pattern(regex) => regex.is_match(s),
+            Filter::Span {
+                begin: start,
+                end,
+                in_section,
+            } => {
+                if *in_section {
+                    let Some(end) = end else {
+                        return true;
+                    };
+                    if end.is_match(s) {
+                        *in_section = false;
+                    }
+                    true
+                } else {
+                    if start.is_match(s) {
+                        *in_section = true;
+                    }
+                    *in_section
+                }
+            }
+        }
+    }
+}
+
+impl TryFrom<&HideConfig> for Filter {
+    type Error = regex::Error;
+
+    fn try_from(value: &HideConfig) -> Result<Self, Self::Error> {
+        let filter = match value {
+            HideConfig::Pattern { pattern } => Filter::Pattern(pattern.as_str().try_into()?),
+            HideConfig::Span { begin, end } => Filter::Span {
+                begin: begin.as_str().try_into()?,
+                end: end.as_deref().map(Regex::try_from).transpose()?,
+                in_section: false,
+            },
+        };
+        Ok(filter)
+    }
+}
+
+impl<'de> Deserialize<'de> for HideConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = HideConfig;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(
+                    formatter,
+                    "a map with the field `pattern`, or a map with the fields `start` and an optional `end`"
+                )
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let unexpected = |k| A::Error::custom(format!("unexpected field `{k}`"));
+                let (k1, v1) = map
+                    .next_entry::<String, String>()?
+                    .ok_or_else(|| A::Error::custom("missing field `pattern` or `start`"))?;
+
+                match &*k1 {
+                    "pattern" => {
+                        if let Some(k2) = map.next_key::<String>()? {
+                            return Err(unexpected(k2));
+                        }
+                        Ok(HideConfig::Pattern { pattern: v1 })
+                    }
+                    "begin" => {
+                        let Some((k2, v2)) = map.next_entry::<String, String>()? else {
+                            return Ok(HideConfig::Span {
+                                begin: v1,
+                                end: None,
+                            });
+                        };
+                        (k2 == "end")
+                            .then(|| HideConfig::Span {
+                                begin: v1,
+                                end: Some(v2),
+                            })
+                            .ok_or_else(|| unexpected(k2))
+                    }
+                    "end" => {
+                        let (k2, v2) = map
+                            .next_entry::<String, String>()?
+                            .ok_or_else(|| A::Error::missing_field("begin"))?;
+                        (k2 == "begin")
+                            .then(|| HideConfig::Span {
+                                begin: v2,
+                                end: Some(v1),
+                            })
+                            .ok_or_else(|| unexpected(k2))
+                    }
+                    _ => Err(unexpected(k1)),
+                }
+            }
+        }
+        deserializer.deserialize_map(Visitor)
+    }
 }

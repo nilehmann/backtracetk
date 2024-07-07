@@ -21,7 +21,7 @@ pub struct Backtrace {
 }
 
 impl Backtrace {
-    pub fn render(&self, filter: &mut impl Filter) -> io::Result<()> {
+    pub fn render(&self, filter: &mut impl FrameFilter) -> io::Result<()> {
         if self.frames.is_empty() {
             return Ok(());
         }
@@ -32,7 +32,7 @@ impl Backtrace {
 
         let mut hidden = 0;
         for frame in self.frames.iter().rev() {
-            if filter.exclude(frame) {
+            if filter.should_hide(frame) {
                 hidden += 1;
             } else {
                 print_hidden_frames_message(hidden, width)?;
@@ -218,7 +218,7 @@ enum ParsedLine {
     ///              at /rustc/b3aa8e7168a3d940122db3561289ffbf3f587262/compiler/rustc_middle/src/ty/context/tls.rs:79:9
     /// ```
     BacktraceSource(SourceInfo),
-    /// A line that doesn't match any pattern
+    /// A line that doesn't match any of the previous patterns
     Other(String),
 }
 
@@ -330,15 +330,6 @@ impl Parser {
     }
 }
 
-pub trait Filter {
-    fn exclude(&mut self, frame: &Frame) -> bool;
-}
-
-impl<F> Filter for F
-where
-    F: FnMut(&Frame) -> bool,
-{
-    fn exclude(&mut self, frame: &Frame) -> bool {
-        (self)(frame)
-    }
+pub trait FrameFilter {
+    fn should_hide(&mut self, frame: &Frame) -> bool;
 }
