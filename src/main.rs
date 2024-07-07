@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
@@ -175,7 +176,7 @@ enum Filter {
     Span {
         begin: Regex,
         end: Option<Regex>,
-        in_section: bool,
+        inside: bool,
     },
 }
 
@@ -186,21 +187,15 @@ impl Filter {
             Filter::Span {
                 begin: start,
                 end,
-                in_section,
+                inside,
             } => {
-                if *in_section {
-                    let Some(end) = end else {
-                        return true;
-                    };
-                    if end.is_match(s) {
-                        *in_section = false;
-                    }
+                if *inside {
+                    let Some(end) = end else { return true };
+                    *inside = !end.is_match(s);
                     true
                 } else {
-                    if start.is_match(s) {
-                        *in_section = true;
-                    }
-                    *in_section
+                    *inside = start.is_match(s);
+                    *inside
                 }
             }
         }
@@ -216,28 +211,34 @@ impl TryFrom<&HideConfig> for Filter {
             HideConfig::Span { begin, end } => Filter::Span {
                 begin: begin.as_str().try_into()?,
                 end: end.as_deref().map(Regex::try_from).transpose()?,
-                in_section: false,
+                inside: false,
             },
         };
         Ok(filter)
     }
 }
 
+// Unfortunately we have to implement our own deserializer.
+// See https://github.com/toml-rs/toml/issues/748 and https://github.com/toml-rs/toml/issues/535
 impl<'de> Deserialize<'de> for HideConfig {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
+        const PATTERN: &str = "pattern";
+        const BEGIN: &str = "begin";
+        const END: &str = "end";
+
         use serde::de::Error;
 
         struct Visitor;
         impl<'de> serde::de::Visitor<'de> for Visitor {
             type Value = HideConfig;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 write!(
-                    formatter,
-                    "a map with the field `pattern`, or a map with the fields `start` and an optional `end`"
+                    f,
+                    "a map with wither the field `{PATTERN}`, or the fields `{BEGIN}` and optionally `{END}`"
                 )
             }
 
@@ -245,44 +246,25 @@ impl<'de> Deserialize<'de> for HideConfig {
             where
                 A: serde::de::MapAccess<'de>,
             {
-                let unexpected = |k| A::Error::custom(format!("unexpected field `{k}`"));
-                let (k1, v1) = map
-                    .next_entry::<String, String>()?
-                    .ok_or_else(|| A::Error::custom("missing field `pattern` or `start`"))?;
+                let mut entries = HashMap::<String, String>::default();
+                while let Some((k, v)) = map.next_entry::<String, String>()? {
+                    entries.insert(k, v);
+                }
 
-                match &*k1 {
-                    "pattern" => {
-                        if let Some(k2) = map.next_key::<String>()? {
-                            return Err(unexpected(k2));
-                        }
-                        Ok(HideConfig::Pattern { pattern: v1 })
-                    }
-                    "begin" => {
-                        let Some((k2, v2)) = map.next_entry::<String, String>()? else {
-                            return Ok(HideConfig::Span {
-                                begin: v1,
-                                end: None,
-                            });
-                        };
-                        (k2 == "end")
-                            .then(|| HideConfig::Span {
-                                begin: v1,
-                                end: Some(v2),
-                            })
-                            .ok_or_else(|| unexpected(k2))
-                    }
-                    "end" => {
-                        let (k2, v2) = map
-                            .next_entry::<String, String>()?
-                            .ok_or_else(|| A::Error::missing_field("begin"))?;
-                        (k2 == "begin")
-                            .then(|| HideConfig::Span {
-                                begin: v2,
-                                end: Some(v1),
-                            })
-                            .ok_or_else(|| unexpected(k2))
-                    }
-                    _ => Err(unexpected(k1)),
+                if entries.contains_key(PATTERN) && entries.contains_key(BEGIN) {
+                    return Err(Error::custom(format!(
+                        "cannot use `{PATTERN}` and `{BEGIN}` toghether"
+                    )));
+                }
+                if let Some(pattern) = entries.remove(PATTERN) {
+                    Ok(HideConfig::Pattern { pattern })
+                } else if let Some(begin) = entries.remove(BEGIN) {
+                    let end = entries.remove(END);
+                    Ok(HideConfig::Span { begin, end })
+                } else {
+                    Err(Error::custom(format!(
+                        "missing field `{PATTERN}` or `{BEGIN}`"
+                    )))
                 }
             }
         }
