@@ -1,7 +1,7 @@
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 
-use backtracetk::config::{self, Config};
+use backtracetk::config::{self, Config, Echo};
 use backtracetk::{Frame, FrameFilter};
 use clap::Parser;
 use regex::Regex;
@@ -13,44 +13,31 @@ struct Args {
     #[arg(trailing_var_arg(true))]
     cmd: Vec<String>,
 
+    /// Print the current detected configuration
     #[arg(long)]
-    style: Option<config::BacktraceStyle>,
+    print_config: bool,
 
+    /// Print the default configuration used when no configuratoin files are detected
     #[arg(long)]
-    clicolor_force: Option<config::ColorChoice>,
-
-    /// By default, backtracetk prints each captured line as it reads it, providing immediate feedback.
-    /// If this flag is set, this output is suppressed, and nothing will be printed until the program
-    /// exits.
-    #[arg(long)]
-    hide_output: bool,
-}
-
-impl Args {
-    fn override_config(&self, config: &mut Config) {
-        if let Some(style) = self.style {
-            config.style = style;
-        }
-        if let Some(choice) = self.clicolor_force {
-            config.clicolor_force = choice;
-        }
-        if self.hide_output {
-            config.hide_output = true;
-        }
-    }
+    print_default_config: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     let mut args = Args::parse();
 
-    let mut config = Config::read()?;
-    args.override_config(&mut config);
+    if args.print_default_config {
+        println!("{}", Config::default());
+        std::process::exit(0);
+    }
+
+    let config = Config::read()?;
+
+    if args.print_config {
+        println!("{config}");
+        std::process::exit(0);
+    }
 
     let mut env_vars = vec![("RUST_BACKTRACE", config.style.env_var_str())];
-
-    if config.should_set_clicolor_force() {
-        env_vars.push(("CLICOLOR_FORCE", "1"));
-    }
 
     for (k, v) in &config.env {
         env_vars.push((k, v));
@@ -75,7 +62,7 @@ fn main() -> anyhow::Result<()> {
     let stderr = child.stderr.expect("failed to open stderr");
     for line in BufReader::new(stderr).lines() {
         let line = line?;
-        if !config.hide_output {
+        if let Echo::True = config.echo {
             anstream::eprintln!("{line}");
         }
         parser.parse_line(line);
@@ -112,7 +99,7 @@ impl FrameFilter for Filters<'_> {
 
 enum Filter<'a> {
     Pattern(&'a Regex),
-    Span {
+    Range {
         begin: &'a Regex,
         end: Option<&'a Regex>,
         inside: bool,
@@ -123,7 +110,7 @@ impl Filter<'_> {
     fn do_match(&mut self, s: &str) -> bool {
         match self {
             Filter::Pattern(regex) => regex.is_match(s),
-            Filter::Span { begin, end, inside } => {
+            Filter::Range { begin, end, inside } => {
                 if *inside {
                     let Some(end) = end else { return true };
                     *inside = !end.is_match(s);
@@ -141,7 +128,7 @@ impl<'a> From<&'a config::Hide> for Filter<'a> {
     fn from(value: &'a config::Hide) -> Self {
         match value {
             config::Hide::Pattern { pattern } => Filter::Pattern(pattern),
-            config::Hide::Span { begin, end } => Filter::Span {
+            config::Hide::Range { begin, end } => Filter::Range {
                 begin,
                 end: end.as_ref(),
                 inside: false,

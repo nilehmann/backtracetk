@@ -91,12 +91,12 @@ impl<'a> RenderCtxt<'a> {
             "{}:{}:{}",
             source_info.file, source_info.lineno, source_info.colno
         );
-        if self.config.links.enabled {
+        if self.config.hyperlinks.enabled {
             if let Some(encoded) = encode_file_path_for_url(&source_info.file) {
-                let url = self
-                    .config
-                    .links
-                    .render(&encoded, source_info.lineno, source_info.colno);
+                let url =
+                    self.config
+                        .hyperlinks
+                        .render(&encoded, source_info.lineno, source_info.colno);
                 anstream::eprintln!("{}  at {}", self.frameno_padding(), Link::new(text, url));
                 return;
             }

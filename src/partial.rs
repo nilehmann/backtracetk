@@ -58,10 +58,16 @@ where
 
 pub trait Complete {
     type Partial: Partial;
+
+    fn into_partial(self) -> Self::Partial;
 }
 
 impl<T> Complete for Vec<T> {
     type Partial = Vec<T>;
+
+    fn into_partial(self) -> Self::Partial {
+        self
+    }
 }
 
 impl<K, V, S> Complete for HashMap<K, V, S>
@@ -69,14 +75,25 @@ where
     K: Eq + Hash,
     S: BuildHasher,
 {
-    type Partial = HashMap<K, V>;
+    type Partial = HashMap<K, V, S>;
+
+    fn into_partial(self) -> Self::Partial {
+        self
+    }
 }
 
-// impl Leaf for i32 {}
 impl Complete for bool {
     type Partial = Option<bool>;
+
+    fn into_partial(self) -> Self::Partial {
+        Some(self)
+    }
 }
 
 impl Complete for String {
     type Partial = Option<String>;
+
+    fn into_partial(self) -> Self::Partial {
+        Some(self)
+    }
 }

@@ -34,28 +34,53 @@ Arguments:
   [CMD]...
 
 Options:
-      --style <STYLE>                    Set the backtrace style to `short` (RUST_BACKTRACE=1) or `full`
-                                         (RUST_BACKTRACE=full) [default: short] [possible values: short, full]
-      --lib-backtrace <LIB_BACKTRACE>    Enable or disable `Backtrace::capture`. If this flag is set to `no`,
-                                         backtracetk sets RUST_LIB_BACKTRACE=0, disabling
-                                         `Backtrace::capture`. If the flag is set to `yes`, no changes are
-                                         made, and the default behavior of capturing backtraces remains
-                                         enabled [default: no] [possible values: yes, no]
-      --clicolor-force <CLICOLOR_FORCE>  If this flag is `yes`, set CLICOLOR_FORCE=1. If the flag is `no`, no
-                                         changes are made [default: yes] [possible values: yes, no]
-      --hide-output                      By default, backtracetk prints each captured line as it reads it,
-                                         providing immediate feedback. If this flag is set, this output is
-                                         suppressed, and nothing will be printed until the program exits
-  -h, --help                             Print help
+      --print-config          Print the current detected configuration
+      --print-default-config  Print the default configuration used when no configuration files are detected
+  -h, --help                  Print help
+
 ```
 
 ### Configuration
 
-Backtracetk will search for a configuration file named `backtrack.toml` or `.backtrack.toml` in the parent directories starting from the directory where the command is executed. Currently, the only supported configuration option is hide, which accepts an array of tables. Each table can take one of two forms:
+Backtracetk can be configured using a TOML file named `backtracetk.toml` or `.backtracetk.toml`.
+It searches for a *global* configuration file in your home directory and a *local* configuration file in the parent directories starting from the current working directory. The local configuration will override the global configuration where they overlap.
 
-* A table with the key `pattern` and a value containing a regex. Any frame matching this pattern will be hidden from the output.
-* A table with the keys `start` and `end`, both containing regex values. Every frame between a frame matching the `start` regex and a frame matching the `end` regex will be hidden. The `end` pattern is optional; if omitted, every frame after matching `start` will be hidden.
+Below is a sample configuration:
 
-For an example:
+```toml
+# Backtracetk Configuration File
 
-![Screenshot2](./screenshot2.png)
+# `style` sets the backtrace detail level.
+# Options:
+# - "short" (default): Sets `RUST_BACKTRACE=1`
+# - "full": Sets `RUST_BACKTRACE=full`
+style = "short"
+
+# `echo` controls whether backtracetk echoes captured lines.
+# - true (default): Captured lines are printed as they are read
+# - false: Suppresses output until the program exits
+echo = true
+
+# `env` allows specifying additional environment variables for the child process.
+[env]
+CLICOLOR_FORCE = "1"     # e.g., force ANSI colors
+RUST_LIB_BACKTRACE = "0" # e.g., disable lib backtrace
+
+# `links` configures the emission of hyperlinks for file paths in the backtrace output.
+[hyperlinks]
+enabled = true                                      # Enable or disable hyperlinking.
+url = "vscode://file${FILE_PATH}:{$LINE}:{$COLUMN}" # Template for generating file links.
+
+# `hide` sections define rules to exclude specific frames from the backtrace output.
+# Frames can be hidden based on regex patterns or ranges between start and end patterns.
+
+# Hide frames matching a specific regex pattern.
+[[hide]]
+pattern = "panic_macro::fn2" # Regex pattern to match frames for exclusion.
+
+# Hide frames within a range defined by start and end regex patterns.
+[[hide]]
+begin = "core::panicking" # Start pattern.
+end = "rust_begin_unwind" # End pattern (optional). If omitted, hides all subsequent frames.
+
+```

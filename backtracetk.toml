@@ -1,6 +1,34 @@
-[[hide]]
-pattern = "panic_macro::fn2"
+# Backtracetk Configuration File
 
+# `style` sets the backtrace detail level.
+# Options:
+# - "short" (default): Sets `RUST_BACKTRACE=1`
+# - "full": Sets `RUST_BACKTRACE=full`
+style = "short"
+
+# `echo` controls whether backtracetk echoes captured lines.
+# - true (default): Captured lines are printed as they are read
+# - false: Suppresses output until the program exits
+echo = true
+
+# `env` allows specifying additional environment variables for the child process.
+[env]
+CLICOLOR_FORCE = "1"     # e.g., force ANSI colors
+RUST_LIB_BACKTRACE = "0" # e.g., disable lib backtrace
+
+# `links` configures the emission of hyperlinks for file paths in the backtrace output.
+[hyperlinks]
+enabled = true                                      # Enable or disable hyperlinking.
+url = "vscode://file${FILE_PATH}:{$LINE}:{$COLUMN}" # Template for generating file links.
+
+# `hide` sections define rules to exclude specific frames from the backtrace output.
+# Frames can be hidden based on regex patterns or ranges between start and end patterns.
+
+# Hide frames matching a specific regex pattern.
 [[hide]]
-begin = "core::panicking"
-end = "rust_begin_unwind"
+pattern = "panic_macro::fn2" # Regex pattern to match frames for exclusion.
+
+# Hide frames within a range defined by start and end regex patterns.
+[[hide]]
+begin = "core::panicking" # Start pattern.
+end = "rust_begin_unwind" # End pattern (optional). If omitted, hides all subsequent frames.

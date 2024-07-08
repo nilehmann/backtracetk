@@ -3,7 +3,7 @@ use core::fmt;
 use std::{
     collections::HashMap,
     fs,
-    io::{self, Read},
+    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -12,36 +12,20 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
-use crate::partial::Partial;
+use crate::partial::{Complete, Partial};
 
-#[derive(Serialize, Partialize)]
+#[derive(Serialize, Partialize, Debug)]
 pub struct Config {
     pub style: BacktraceStyle,
-    pub hide: Vec<Hide>,
+    pub echo: Echo,
+    pub hyperlinks: HyperLinks,
     pub env: HashMap<String, String>,
-    pub clicolor_force: ColorChoice,
-    pub hide_output: bool,
-    pub links: Links,
+    pub hide: Vec<Hide>,
 }
 
 impl Config {
     pub fn read() -> anyhow::Result<Config> {
         PartialConfig::read().map(PartialConfig::into_complete)
-    }
-
-    pub fn should_set_clicolor_force(&self) -> bool {
-        match self.clicolor_force {
-            ColorChoice::Auto => {
-                match anstream::AutoStream::choice(&io::stderr()) {
-                    anstream::ColorChoice::Never => false,
-                    anstream::ColorChoice::AlwaysAnsi | anstream::ColorChoice::Always => true,
-                    // this should never happen
-                    anstream::ColorChoice::Auto => false,
-                }
-            }
-            ColorChoice::Always => true,
-            ColorChoice::Never => false,
-        }
     }
 }
 
@@ -55,25 +39,24 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             style: Default::default(),
-            hide: vec![Hide::Span {
+            hide: vec![Hide::Range {
                 begin: Regex::new("core::panicking::panic_explicit").unwrap(),
                 end: None,
             }],
             env: Default::default(),
-            clicolor_force: Default::default(),
-            hide_output: false,
-            links: Default::default(),
+            echo: Default::default(),
+            hyperlinks: Default::default(),
         }
     }
 }
 
-#[derive(Serialize, Partialize)]
-pub struct Links {
+#[derive(Serialize, Partialize, Debug)]
+pub struct HyperLinks {
     pub enabled: bool,
     pub url: String,
 }
 
-impl Links {
+impl HyperLinks {
     pub fn render(&self, file: &str, line: usize, col: usize) -> String {
         self.url
             .replace("${LINE}", &format!("{line}"))
@@ -82,7 +65,7 @@ impl Links {
     }
 }
 
-impl Default for Links {
+impl Default for HyperLinks {
     fn default() -> Self {
         Self {
             enabled: false,
@@ -91,16 +74,35 @@ impl Default for Links {
     }
 }
 
-#[derive(Clone, Copy, Serialize, clap::ValueEnum, Deserialize, Debug, Default, Complete)]
-#[serde(rename_all = "lowercase")]
-pub enum ColorChoice {
+#[derive(Clone, Copy, Serialize, Deserialize, Complete, Default, Debug)]
+#[serde(from = "bool")]
+#[serde(into = "bool")]
+pub enum Echo {
     #[default]
-    Auto,
-    Always,
-    Never,
+    True,
+    False,
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize, clap::ValueEnum, Debug, Default, Complete)]
+impl From<bool> for Echo {
+    fn from(b: bool) -> Self {
+        if b {
+            Echo::True
+        } else {
+            Echo::False
+        }
+    }
+}
+
+impl Into<bool> for Echo {
+    fn into(self) -> bool {
+        match self {
+            Echo::True => true,
+            Echo::False => false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, Default, Complete)]
 #[serde(rename_all = "lowercase")]
 pub enum BacktraceStyle {
     #[default]
@@ -125,7 +127,7 @@ pub enum Hide {
         #[serde_as(as = "DisplayFromStr")]
         pattern: Regex,
     },
-    Span {
+    Range {
         #[serde_as(as = "DisplayFromStr")]
         begin: Regex,
         #[serde_as(as = "Option<DisplayFromStr>")]
@@ -178,7 +180,7 @@ impl<'de> Deserialize<'de> for Hide {
                 } else if let Some(begin) = entries.remove(BEGIN) {
                     let begin = re(&begin)?;
                     let end = entries.remove(END).as_deref().map(re).transpose()?;
-                    Ok(Hide::Span { begin, end })
+                    Ok(Hide::Range { begin, end })
                 } else {
                     Err(Error::custom(format!(
                         "missing field `{PATTERN}` or `{BEGIN}`"
@@ -195,7 +197,7 @@ impl PartialConfig {
         let config = PartialConfig::find_home_file()
             .map(PartialConfig::parse_file)
             .transpose()?
-            .unwrap_or_default();
+            .unwrap_or_else(|| Config::default().into_partial());
         let Some(local_path) = PartialConfig::find_local_file() else {
             return Ok(config);
         };
