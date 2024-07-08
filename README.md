@@ -63,13 +63,13 @@ echo = true
 
 # `env` allows specifying additional environment variables for the child process.
 [env]
-CLICOLOR_FORCE = "1"     # e.g., force ANSI colors
+CLICOLOR_FORCE = "1"     # e.g., try forcing ANSI colors
 RUST_LIB_BACKTRACE = "0" # e.g., disable lib backtrace
 
-# `links` configures the emission of hyperlinks for file paths in the backtrace output.
+# `hyperlinks` configures the mission of hyperlinks for file paths in the backtrace output.
 [hyperlinks]
 enabled = true                                      # Enable or disable hyperlinking.
-url = "vscode://file${FILE_PATH}:{$LINE}:{$COLUMN}" # Template for generating file links.
+url = "vscode://file${FILE_PATH}:${LINE}:${COLUMN}" # Template for generating file links.
 
 # `hide` sections define rules to exclude specific frames from the backtrace output.
 # Frames can be hidden based on regex patterns or ranges between start and end patterns.
@@ -82,5 +82,4 @@ pattern = "panic_macro::fn2" # Regex pattern to match frames for exclusion.
 [[hide]]
 begin = "core::panicking" # Start pattern.
 end = "rust_begin_unwind" # End pattern (optional). If omitted, hides all subsequent frames.
-
 ```

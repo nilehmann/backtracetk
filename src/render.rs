@@ -237,6 +237,8 @@ impl fmt::Display for Link {
 }
 
 fn encode_file_path_for_url(path: &str) -> Option<String> {
+    println!("{path:?}");
     let path = Path::new(path).canonicalize().ok()?;
+    println!("{path:?}");
     Some(format!("{}", path.display()))
 }
