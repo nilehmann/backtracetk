@@ -12,6 +12,5 @@ home = "0.5.9"
 macros = { path = "macros" }
 regex = "1.10.5"
 serde = { version = "1.0.203", features = ["derive"] }
-serde_with = "3.8.3"
 termion = "4.0.2"
 toml = "0.8.14"

@@ -9,8 +9,7 @@ use std::{
 
 use macros::{Complete, Partialize};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
+use serde::{ser::SerializeMap, Deserialize, Serialize};
 
 use crate::partial::{Complete, Partial};
 
@@ -119,21 +118,15 @@ impl BacktraceStyle {
     }
 }
 
-#[serde_as]
-#[derive(Serialize, Debug)]
-#[serde(untagged)]
+#[derive(Debug)]
 pub enum Hide {
-    Pattern {
-        #[serde_as(as = "DisplayFromStr")]
-        pattern: Regex,
-    },
-    Range {
-        #[serde_as(as = "DisplayFromStr")]
-        begin: Regex,
-        #[serde_as(as = "Option<DisplayFromStr>")]
-        end: Option<Regex>,
-    },
+    Pattern { pattern: Regex },
+    Range { begin: Regex, end: Option<Regex> },
 }
+
+const PATTERN: &str = "pattern";
+const BEGIN: &str = "begin";
+const END: &str = "end";
 
 // Unfortunately we have to implement our own deserializer.
 // See https://github.com/toml-rs/toml/issues/748 and https://github.com/toml-rs/toml/issues/535
@@ -142,10 +135,6 @@ impl<'de> Deserialize<'de> for Hide {
     where
         D: serde::Deserializer<'de>,
     {
-        const PATTERN: &str = "pattern";
-        const BEGIN: &str = "begin";
-        const END: &str = "end";
-
         use serde::de::Error;
 
         struct Visitor;
@@ -189,6 +178,25 @@ impl<'de> Deserialize<'de> for Hide {
             }
         }
         deserializer.deserialize_map(Visitor)
+    }
+}
+
+impl Serialize for Hide {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut m = serializer.serialize_map(None)?;
+        match self {
+            Hide::Pattern { pattern } => m.serialize_entry(PATTERN, pattern.as_str())?,
+            Hide::Range { begin, end } => {
+                m.serialize_entry(BEGIN, begin.as_str())?;
+                if let Some(end) = end {
+                    m.serialize_entry(END, end.as_str())?;
+                }
+            }
+        }
+        m.end()
     }
 }
 
