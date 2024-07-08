@@ -7,22 +7,26 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use macros::{Complete, Partialize};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
-#[derive(Serialize, Debug)]
+use crate::partial::Partial;
+
+#[derive(Serialize, Partialize)]
 pub struct Config {
     pub style: BacktraceStyle,
     pub hide: Vec<Hide>,
     pub env: HashMap<String, String>,
     pub clicolor_force: ColorChoice,
     pub hide_output: bool,
+    pub links: Links,
 }
 
 impl Config {
     pub fn read() -> anyhow::Result<Config> {
-        OptConfig::read().map(Config::from)
+        PartialConfig::read().map(PartialConfig::into_complete)
     }
 
     pub fn should_set_clicolor_force(&self) -> bool {
@@ -58,93 +62,27 @@ impl Default for Config {
             env: Default::default(),
             clicolor_force: Default::default(),
             hide_output: false,
+            links: Default::default(),
         }
     }
 }
 
-impl From<OptConfig> for Config {
-    fn from(conf: OptConfig) -> Self {
+#[derive(Serialize, Partialize)]
+pub struct Links {
+    pub enabled: bool,
+    pub url: String,
+}
+
+impl Default for Links {
+    fn default() -> Self {
         Self {
-            style: conf.style.unwrap_or_default(),
-            hide: conf.hide,
-            env: conf.env,
-            clicolor_force: conf.clicolor_force.unwrap_or_default(),
-            hide_output: conf.hide_output.unwrap_or(false),
+            enabled: false,
+            url: "file://${FILE_PATH}".to_string(),
         }
     }
 }
 
-#[derive(Default, Deserialize, Debug)]
-#[serde(default)]
-pub struct OptConfig {
-    pub style: Option<BacktraceStyle>,
-    pub hide: Vec<Hide>,
-    pub env: HashMap<String, String>,
-    pub clicolor_force: Option<ColorChoice>,
-    pub hide_output: Option<bool>,
-}
-
-impl OptConfig {
-    pub fn read() -> anyhow::Result<OptConfig> {
-        let config = OptConfig::find_home_file()
-            .map(OptConfig::parse_file)
-            .transpose()?
-            .unwrap_or_default();
-        let Some(local_path) = OptConfig::find_local_file() else {
-            return Ok(config);
-        };
-        Ok(config.merge_with(OptConfig::parse_file(local_path)?))
-    }
-
-    fn merge_with(mut self, other: OptConfig) -> OptConfig {
-        self.hide.extend(other.hide);
-        self.env.extend(other.env.into_iter());
-        OptConfig {
-            style: other.style.or(self.style),
-            hide: self.hide,
-            env: self.env,
-            clicolor_force: other.clicolor_force.or(self.clicolor_force),
-            hide_output: other.hide_output.or(self.hide_output),
-        }
-    }
-
-    fn parse_file(path: PathBuf) -> anyhow::Result<OptConfig> {
-        let mut contents = String::new();
-        let mut file = fs::File::open(path)?;
-        file.read_to_string(&mut contents)?;
-        let config = toml::from_str(&contents)?;
-        Ok(config)
-    }
-
-    fn find_home_file() -> Option<PathBuf> {
-        let home_dir = home::home_dir()?;
-        OptConfig::find_file_in(&home_dir)
-    }
-
-    fn find_local_file() -> Option<PathBuf> {
-        let mut path = std::env::current_dir().unwrap();
-        loop {
-            if let Some(file) = OptConfig::find_file_in(&path) {
-                return Some(file);
-            }
-            if !path.pop() {
-                return None;
-            }
-        }
-    }
-
-    fn find_file_in(dir: &Path) -> Option<PathBuf> {
-        for name in ["backtracetk.toml", ".backtracetk.toml"] {
-            let file = dir.join(name);
-            if file.exists() {
-                return Some(file);
-            }
-        }
-        None
-    }
-}
-
-#[derive(Clone, Copy, Serialize, clap::ValueEnum, Deserialize, Debug, Default)]
+#[derive(Clone, Copy, Serialize, clap::ValueEnum, Deserialize, Debug, Default, Complete)]
 #[serde(rename_all = "lowercase")]
 pub enum ColorChoice {
     #[default]
@@ -153,7 +91,7 @@ pub enum ColorChoice {
     Never,
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize, clap::ValueEnum, Debug, Default)]
+#[derive(Clone, Copy, Serialize, Deserialize, clap::ValueEnum, Debug, Default, Complete)]
 #[serde(rename_all = "lowercase")]
 pub enum BacktraceStyle {
     #[default]
@@ -240,5 +178,53 @@ impl<'de> Deserialize<'de> for Hide {
             }
         }
         deserializer.deserialize_map(Visitor)
+    }
+}
+
+impl PartialConfig {
+    fn read() -> anyhow::Result<PartialConfig> {
+        let config = PartialConfig::find_home_file()
+            .map(PartialConfig::parse_file)
+            .transpose()?
+            .unwrap_or_default();
+        let Some(local_path) = PartialConfig::find_local_file() else {
+            return Ok(config);
+        };
+        Ok(config.merge_with(PartialConfig::parse_file(local_path)?))
+    }
+
+    fn parse_file(path: PathBuf) -> anyhow::Result<PartialConfig> {
+        let mut contents = String::new();
+        let mut file = fs::File::open(path)?;
+        file.read_to_string(&mut contents)?;
+        let config = toml::from_str(&contents)?;
+        Ok(config)
+    }
+
+    fn find_home_file() -> Option<PathBuf> {
+        let home_dir = home::home_dir()?;
+        PartialConfig::find_file_in(&home_dir)
+    }
+
+    fn find_local_file() -> Option<PathBuf> {
+        let mut path = std::env::current_dir().unwrap();
+        loop {
+            if let Some(file) = PartialConfig::find_file_in(&path) {
+                return Some(file);
+            }
+            if !path.pop() {
+                return None;
+            }
+        }
+    }
+
+    fn find_file_in(dir: &Path) -> Option<PathBuf> {
+        for name in ["backtracetk.toml", ".backtracetk.toml"] {
+            let file = dir.join(name);
+            if file.exists() {
+                return Some(file);
+            }
+        }
+        None
     }
 }

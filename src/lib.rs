@@ -1,4 +1,5 @@
 pub mod config;
+mod partial;
 
 use std::{
     fs::File,

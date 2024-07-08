@@ -3,14 +3,13 @@ edition = "2021"
 name = "backtracetk"
 version = "0.1.0"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 anstream = "0.6.14"
 anstyle = "1.0.7"
 anyhow = "1.0.86"
 clap = { version = "4.5.8", features = ["derive", "wrap_help"] }
 home = "0.5.9"
+macros = { path = "macros" }
 regex = "1.10.5"
 serde = { version = "1.0.203", features = ["derive"] }
 serde_with = "3.8.3"
