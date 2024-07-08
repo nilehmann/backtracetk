@@ -73,11 +73,20 @@ pub struct Links {
     pub url: String,
 }
 
+impl Links {
+    pub fn render(&self, file: &str, line: usize, col: usize) -> String {
+        self.url
+            .replace("${LINE}", &format!("{line}"))
+            .replace("${COLUMN}", &format!("{col}"))
+            .replace("${FILE_PATH}", file)
+    }
+}
+
 impl Default for Links {
     fn default() -> Self {
         Self {
             enabled: false,
-            url: "file://${FILE_PATH}".to_string(),
+            url: r"file://${FILE_PATH}".to_string(),
         }
     }
 }

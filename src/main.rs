@@ -82,7 +82,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     for backtrace in parser.into_backtraces() {
-        backtrace.render(&mut Filters::new(&config))?;
+        backtrace.render(&config, &mut Filters::new(&config));
     }
 
     Ok(())
