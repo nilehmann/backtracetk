@@ -20,7 +20,7 @@ cargo install --git https://github.com/nilehmann/backtracetk
 
 ## Screenshot
 
-![Screenshot](./screenshot1.png)
+![Screenshot](./screenshot.png)
 
 ## Usage
 
